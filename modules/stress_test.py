@@ -123,6 +123,9 @@ def _apply_stress(holdings: pd.DataFrame, companies: pd.DataFrame,
     latest = (quarterly.sort_values("quarter_end")
               .groupby("fund_id").last()[["ending_nav_mm", "tvpi", "irr"]].reset_index())
     fund_impact = fund_impact.merge(latest, on="fund_id", how="left")
+    # Cap impact: stressed NAV cannot go below zero (max loss = -100%)
+    fund_impact["total_impact_mm"] = fund_impact[["total_impact_mm", "ending_nav_mm"]].apply(
+        lambda r: max(r["total_impact_mm"], -r["ending_nav_mm"]), axis=1)
     fund_impact["stressed_nav_mm"] = (fund_impact["ending_nav_mm"] +
                                        fund_impact["total_impact_mm"]).clip(lower=0)
     fund_impact["nav_change_pct"] = (fund_impact["total_impact_mm"] /
