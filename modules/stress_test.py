@@ -13,25 +13,27 @@ from plotly.subplots import make_subplots
 
 
 # Sector sensitivity to macro factors (betas)
+# Calibrated so worst-case single-scenario impact is ~30-40% NAV decline
+# (consistent with 2008 GFC PE drawdowns of 20-40%)
 SECTOR_SENSITIVITIES = {
     #                        rate_hike  recession  inflation  sector_shock
-    "Technology":           [-0.25,     -0.20,     -0.10,     0.00],
-    "Healthcare":           [-0.05,     -0.05,      0.05,     0.00],
-    "Consumer / Retail":    [-0.15,     -0.30,     -0.20,     0.00],
-    "Industrials":          [-0.10,     -0.25,     -0.10,     0.00],
-    "Financial Services":   [-0.20,     -0.30,      0.05,     0.00],
-    "Energy":               [ 0.05,     -0.15,      0.15,     0.00],
-    "Real Estate":          [-0.30,     -0.20,     -0.05,     0.00],
-    "Media & Telecom":      [-0.15,     -0.15,     -0.05,     0.00],
+    "Technology":           [-0.12,     -0.10,     -0.05,     0.00],
+    "Healthcare":           [-0.03,     -0.03,      0.02,     0.00],
+    "Consumer / Retail":    [-0.08,     -0.15,     -0.10,     0.00],
+    "Industrials":          [-0.06,     -0.12,     -0.05,     0.00],
+    "Financial Services":   [-0.10,     -0.15,      0.02,     0.00],
+    "Energy":               [ 0.03,     -0.08,      0.08,     0.00],
+    "Real Estate":          [-0.15,     -0.10,     -0.03,     0.00],
+    "Media & Telecom":      [-0.08,     -0.08,     -0.03,     0.00],
 }
 
 STRATEGY_SENSITIVITIES = {
-    "Buyout":                    {"leverage_factor": 1.5, "recovery_speed": 0.8},
+    "Buyout":                    {"leverage_factor": 1.3, "recovery_speed": 0.8},
     "Growth Equity":             {"leverage_factor": 1.0, "recovery_speed": 0.7},
-    "Venture Capital":           {"leverage_factor": 0.5, "recovery_speed": 0.5},
-    "Distressed / Special Sits": {"leverage_factor": 2.0, "recovery_speed": 1.2},
-    "Real Estate":               {"leverage_factor": 1.8, "recovery_speed": 0.6},
-    "Infrastructure":            {"leverage_factor": 1.3, "recovery_speed": 0.9},
+    "Venture Capital":           {"leverage_factor": 0.8, "recovery_speed": 0.5},
+    "Distressed / Special Sits": {"leverage_factor": 1.4, "recovery_speed": 1.2},
+    "Real Estate":               {"leverage_factor": 1.5, "recovery_speed": 0.6},
+    "Infrastructure":            {"leverage_factor": 1.1, "recovery_speed": 0.9},
 }
 
 SCENARIOS = {
@@ -93,8 +95,8 @@ def _apply_stress(holdings: pd.DataFrame, companies: pd.DataFrame,
         if target and sector == target:
             impact -= scenario.get("sector_shock", 0)
         elif target and sector != target:
-            # Spillover: ~20% of sector shock affects others
-            impact -= scenario.get("sector_shock", 0) * 0.20
+            # Spillover: ~5% of sector shock affects others
+            impact -= scenario.get("sector_shock", 0) * 0.05
 
         # Amplify by leverage
         impact *= strat_profile["leverage_factor"]
