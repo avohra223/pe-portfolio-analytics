@@ -114,10 +114,9 @@ def _apply_stress(holdings: pd.DataFrame, companies: pd.DataFrame,
 
     impact_df = pd.DataFrame(impacts)
 
-    # Aggregate to fund level
+    # Aggregate to fund level — compute weighted average impact %
     fund_impact = (impact_df.groupby(["fund_id", "fund_name", "strategy"])
                    .agg(total_cost=("initial_cost_mm", "sum"),
-                        total_impact_mm=("nav_impact_mm", "sum"),
                         avg_impact_pct=("nav_impact_pct", "mean"))
                    .reset_index())
 
@@ -125,13 +124,13 @@ def _apply_stress(holdings: pd.DataFrame, companies: pd.DataFrame,
     latest = (quarterly.sort_values("quarter_end")
               .groupby("fund_id").last()[["ending_nav_mm", "tvpi", "irr"]].reset_index())
     fund_impact = fund_impact.merge(latest, on="fund_id", how="left")
-    # Cap impact: stressed NAV cannot go below zero (max loss = -100%)
-    fund_impact["total_impact_mm"] = fund_impact[["total_impact_mm", "ending_nav_mm"]].apply(
-        lambda r: max(r["total_impact_mm"], -r["ending_nav_mm"]), axis=1)
+
+    # Apply impact as % of actual NAV (not holdings cost)
+    # This ensures impact is proportional to fund value, not raw cost basis
+    fund_impact["total_impact_mm"] = fund_impact["ending_nav_mm"] * fund_impact["avg_impact_pct"]
     fund_impact["stressed_nav_mm"] = (fund_impact["ending_nav_mm"] +
                                        fund_impact["total_impact_mm"]).clip(lower=0)
-    fund_impact["nav_change_pct"] = (fund_impact["total_impact_mm"] /
-                                      fund_impact["ending_nav_mm"].clip(lower=0.01))
+    fund_impact["nav_change_pct"] = fund_impact["avg_impact_pct"]
 
     return fund_impact, impact_df
 
