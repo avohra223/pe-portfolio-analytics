@@ -157,25 +157,27 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, companies: pd.DataFrame
         if key in scenario:
             scenario[key] *= severity_mult
 
-    # ── Custom Scenario ────────────────────────────────────────────
-    with st.expander("Custom Scenario Parameters"):
+    # ── Custom Scenario Override ──────────────────────────────────
+    # Keys include scenario name so switching scenarios resets sliders
+    sk = scenario_name.replace(" ", "_").lower()
+    with st.expander("Adjust Scenario Parameters (overrides selected scenario)"):
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             scenario["rate_hike"] = st.slider("Rate Change", -0.20, 0.50,
                                                float(scenario.get("rate_hike", 0)), 0.05,
-                                               key="custom_rate")
+                                               key=f"rate_{sk}")
         with c2:
             scenario["recession"] = st.slider("Recession Severity", 0.0, 0.80,
                                                float(scenario.get("recession", 0)), 0.05,
-                                               key="custom_recession")
+                                               key=f"recess_{sk}")
         with c3:
             scenario["inflation"] = st.slider("Inflation Shock", -0.20, 0.50,
                                                float(scenario.get("inflation", 0)), 0.05,
-                                               key="custom_inflation")
+                                               key=f"infl_{sk}")
         with c4:
             scenario["sector_shock"] = st.slider("Sector Shock", 0.0, 0.60,
                                                   float(scenario.get("sector_shock", 0)), 0.05,
-                                                  key="custom_sector")
+                                                  key=f"sector_{sk}")
 
     # ── Run Stress Test ────────────────────────────────────────────
     fund_impact, company_impact = _apply_stress(holdings, companies, funds, quarterly, scenario)
