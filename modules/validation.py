@@ -260,24 +260,39 @@ def render(quarterly_dirty: pd.DataFrame, funds: pd.DataFrame, gps: pd.DataFrame
     # ── Data Quality Score ─────────────────────────────────────────
     st.divider()
     st.subheader("Overall Data Quality Score")
-    quality_score = max(0, 100 - (n_critical * 10 + n_high * 5 + n_medium * 2))
-    quality_score = min(100, quality_score)
+
+    # Weighted penalty normalised by total records:
+    # Critical 5x, High 2x, Medium 1x
+    weighted_issues = n_critical * 5 + n_high * 2 + n_medium * 1
+    penalty = (weighted_issues / max(n_total, 1)) * 100
+    quality_score = max(0, min(100, round(100 - penalty)))
+
+    # Score band label
+    if quality_score >= 85:
+        score_label = "Good"
+    elif quality_score >= 65:
+        score_label = "Acceptable"
+    elif quality_score >= 40:
+        score_label = "Needs Improvement"
+    else:
+        score_label = "Critical"
 
     fig_gauge = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
+        mode="gauge+number",
         value=quality_score,
         domain={"x": [0, 1], "y": [0, 1]},
-        title={"text": "Data Quality Score"},
-        delta={"reference": 90, "decreasing": {"color": "red"}},
+        title={"text": f"Data Quality Score — {score_label}"},
         gauge={
             "axis": {"range": [0, 100]},
-            "bar": {"color": "#2ecc71" if quality_score >= 80 else "#e74c3c"},
+            "bar": {"color": "#2ecc71" if quality_score >= 80 else
+                    "#f39c12" if quality_score >= 60 else "#e74c3c"},
             "steps": [
-                {"range": [0, 50], "color": "#fde8e8"},
-                {"range": [50, 80], "color": "#fef3e0"},
-                {"range": [80, 100], "color": "#e8f8e8"},
+                {"range": [0, 40], "color": "#fde8e8"},
+                {"range": [40, 65], "color": "#fef3e0"},
+                {"range": [65, 85], "color": "#fef9e0"},
+                {"range": [85, 100], "color": "#e8f8e8"},
             ],
-            "threshold": {"line": {"color": "red", "width": 4}, "thickness": 0.75, "value": 90},
+            "threshold": {"line": {"color": "red", "width": 4}, "thickness": 0.75, "value": 85},
         },
     ))
     fig_gauge.update_layout(height=350, margin=dict(l=40, r=40, t=60, b=20))
