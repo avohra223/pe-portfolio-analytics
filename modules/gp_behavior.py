@@ -71,7 +71,16 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
                    .agg(avg_nav_change=("nav_change_pct", "mean"),
                         markup_rate=("markup", "mean"),
                         markdown_rate=("markdown", "mean"))
-                   .reset_index())
+                   .reset_index()
+                   .sort_values("fund_age_q"))
+
+    # Smooth markup rate with 4-quarter centered rolling average
+    # Eliminates jagged 0%/100% swings from low sample sizes per quarter
+    age_pattern["markup_rate_smooth"] = (
+        age_pattern["markup_rate"]
+        .rolling(window=4, center=True, min_periods=1)
+        .mean()
+    )
 
     fig_pattern = make_subplots(specs=[[{"secondary_y": True}]])
     fig_pattern.add_trace(
@@ -81,8 +90,8 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
         secondary_y=False,
     )
     fig_pattern.add_trace(
-        go.Scatter(x=age_pattern["fund_age_q"], y=age_pattern["markup_rate"],
-                   name="Markup Rate", line=dict(color="#3498db", width=2)),
+        go.Scatter(x=age_pattern["fund_age_q"], y=age_pattern["markup_rate_smooth"],
+                   name="Markup Rate (4Q Avg)", line=dict(color="#3498db", width=2)),
         secondary_y=True,
     )
     fig_pattern.update_layout(

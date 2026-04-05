@@ -398,22 +398,31 @@ def _simulate_fund(n_quarters: int, vintage: int, strategy: str,
     cum_dists = np.cumsum(dists)
 
     # Build a TVPI curve over the fund's life
+    # Key: TVPI measures total value / paid-in, so it captures the J-curve.
+    # NAV change per quarter = (TVPI_q * cum_calls_q - cum_dists_q) - prev_NAV
+    # For NAV *change %* to be negative in Q1-Q6, TVPI must drop faster than
+    # capital is being called. We deepen the J-curve trough to ~0.82.
     tvpi_curve = np.zeros(n_quarters)
     for q in range(n_quarters):
         age_frac = q / max(n_quarters - 1, 1)
-        if age_frac < 0.20:
-            # Years 1-2: J-curve dip. TVPI drops from 1.0 to ~0.88
-            tvpi_curve[q] = 1.0 - 0.12 * (age_frac / 0.20)
+        if age_frac < 0.15:
+            # Q1-Q6: Deep J-curve dip. TVPI drops from 1.0 to ~0.82
+            # (fees, setup costs, early write-downs before value creation)
+            tvpi_curve[q] = 1.0 - 0.18 * (age_frac / 0.15)
+        elif age_frac < 0.25:
+            # Q7-Q10: Gradual recovery, still below 1.0
+            progress = (age_frac - 0.15) / 0.10
+            tvpi_curve[q] = 0.82 + 0.10 * progress  # ~0.82 to ~0.92
         elif age_frac < 0.40:
-            # Years 3-4: recovery to breakeven
-            progress = (age_frac - 0.20) / 0.20
-            tvpi_curve[q] = 0.88 + 0.12 * progress  # back to ~1.0
+            # Q11-Q16: Cross breakeven, start value creation
+            progress = (age_frac - 0.25) / 0.15
+            tvpi_curve[q] = 0.92 + 0.08 * progress  # ~0.92 to ~1.0
         elif age_frac < 0.75:
-            # Years 5-7.5: main value creation — TVPI ramps to target
+            # Q17-Q30: Main value creation — TVPI ramps to target
             progress = (age_frac - 0.40) / 0.35
             tvpi_curve[q] = 1.0 + progress * (target_tvpi - 1.0)
         else:
-            # Years 8+: at target TVPI, harvesting
+            # Q31+: At target TVPI, harvesting
             tvpi_curve[q] = target_tvpi
 
     current_nav = 0.0
