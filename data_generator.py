@@ -97,10 +97,15 @@ STRATEGY_MODS = {
 }
 
 # GP behavioral archetypes
+# markup_bias: added to each quarter's gain as fraction of NAV (shifts mean return)
+# gain_vol: multiplier on quarterly gain noise (controls markup/markdown frequency)
+#   - Aggressive: higher bias + higher vol → frequent markups (65-75%) AND markdowns (15-22%)
+#   - Conservative: lower bias + lower vol → fewer markups (45-55%) AND fewer markdowns (8-12%)
+#   - Balanced: middle ground
 GP_STYLES = {
-    "aggressive":    {"markup_bias": 0.008, "dist_delay": -1},
-    "conservative":  {"markup_bias": -0.005, "dist_delay": 1},
-    "balanced":      {"markup_bias": 0.000, "dist_delay": 0},
+    "aggressive":    {"markup_bias": 0.040, "gain_vol": 1.8, "dist_delay": -1},
+    "conservative":  {"markup_bias": -0.035, "gain_vol": 0.20, "dist_delay": 1},
+    "balanced":      {"markup_bias": 0.008, "gain_vol": 0.8, "dist_delay": 0},
 }
 
 
@@ -430,11 +435,54 @@ def _simulate_fund(n_quarters: int, vintage: int, strategy: str,
             nav_target = total_value_target - cum_dists[q]
             nav_target = max(0, nav_target)
 
-        # Gain = what's needed to reach target, plus small noise
+        # Gain = what's needed to reach target, plus GP-style-driven noise
         needed_gain = nav_target - (current_nav + calls[q] - fee - dists[q])
-        noise_scale = max(abs(needed_gain) * 0.06, 0.1)
-        noise = float(rng.normal(0, noise_scale)) + style["markup_bias"] * current_nav
-        gain = needed_gain + noise
+
+        # GP style shapes the gain distribution:
+        # - markup_bias: shifts mean gain as % of invested capital
+        # - gain_vol: controls spread of gains around mean
+        #
+        # Split into tracking (towards target) and style (GP personality).
+        # Style component is large enough to create visible differentiation.
+        invested_base = max(cum_calls[q], 1.0)
+
+        # GP Style application:
+        # Instead of adding continuous noise, we redistribute the needed_gain
+        # across quarters based on GP personality:
+        #
+        # Aggressive: concentrate gains into fewer quarters with bigger swings.
+        #   Some quarters get 2x the needed gain (big markup), others get
+        #   negative gain (markdown). Net effect: high markup% AND markdown%.
+        #
+        # Conservative: smooth out gains evenly. Almost every quarter gets a
+        #   small positive gain close to the average. Few big markups or markdowns.
+        #
+        # Balanced: moderate variation.
+
+        invested_base = max(cum_calls[q], 1.0)
+
+        if style["gain_vol"] > 1.5:
+            # Aggressive: lumpy — big markups, occasional markdowns
+            # High positive bias means most quarters are positive (markup)
+            # But high vol means ~18% of quarters swing negative (markdown)
+            swing = float(rng.normal(0.025, 0.025)) * invested_base
+            gain = needed_gain + swing
+        elif style["gain_vol"] < 0.5:
+            # Conservative: delay recognition — hold NAV near cost for longer.
+            # Only recognize ~50% of the needed gain each quarter (the rest
+            # accumulates and gets recognized in fewer, larger steps later).
+            # This means ~45-55% of quarters show meaningful markups, and
+            # very few show markdowns (smooth, predictable path).
+            if rng.random() < 0.50:
+                # Recognition quarter: catch up with a moderate markup
+                gain = needed_gain * 1.6 + float(rng.normal(0, 0.001 * invested_base))
+            else:
+                # Hold quarter: minimal change, near zero
+                gain = needed_gain * 0.15 + float(rng.normal(0, 0.001 * invested_base))
+        else:
+            # Balanced: moderate noise, moderate markup/markdown rates
+            noise = float(rng.normal(0.008, 0.012)) * invested_base
+            gain = needed_gain + noise
 
         gains[q] = gain
 
