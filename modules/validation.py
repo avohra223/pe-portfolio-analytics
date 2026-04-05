@@ -205,19 +205,16 @@ def render(quarterly_dirty: pd.DataFrame, funds: pd.DataFrame, gps: pd.DataFrame
     st.subheader("Issues Over Time")
     timeline = issues_df.copy()
     timeline["quarter_dt"] = pd.to_datetime(timeline["quarter"])
-    timeline["quarter_label"] = timeline["quarter_dt"].dt.to_period("Q").astype(str)
-    timeline_agg = (timeline.groupby(["quarter_label", "quarter_dt", "check"])
-                    .size().reset_index(name="count"))
-    timeline_agg = timeline_agg.sort_values("quarter_dt")
-    # Use sorted category order so plotly respects chronological sequence
-    q_order = timeline_agg["quarter_label"].drop_duplicates().tolist()
-    timeline_agg["quarter_label"] = pd.Categorical(
-        timeline_agg["quarter_label"], categories=q_order, ordered=True)
-    fig_time = px.bar(timeline_agg, x="quarter_label", y="count", color="check",
-                      barmode="stack", labels={"quarter_label": "Quarter",
+    # Group by actual datetime (not string) so sorting is inherently chronological
+    timeline_agg = (timeline.groupby(["quarter_dt", "check"])
+                    .size().reset_index(name="count")
+                    .sort_values("quarter_dt"))
+    fig_time = px.bar(timeline_agg, x="quarter_dt", y="count", color="check",
+                      barmode="stack", labels={"quarter_dt": "Quarter",
                                                 "count": "Count", "check": "Check"})
     fig_time.update_layout(height=400, margin=dict(l=20, r=20, t=30, b=20))
-    fig_time.update_xaxes(tickangle=45, dtick=4)
+    fig_time.update_xaxes(tickangle=45, dtick="M6",  # tick every 6 months
+                          tickformat="%YQ%q")
     st.plotly_chart(fig_time, use_container_width=True)
 
     st.divider()
