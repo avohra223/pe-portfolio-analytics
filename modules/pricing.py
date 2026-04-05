@@ -1,10 +1,10 @@
 """
 Module 4: Secondary Pricing Model
-Estimate bid price as % of NAV based on fund age, strategy, cash flow patterns,
-GP track record, unfunded commitments.
+Estimate bid price as % of NAV based on fund characteristics,
+GP track record, and market dynamics.
 
-Uses Ridge regression (better than gradient boosting for N=30) with
-Leave-One-Out cross-validation.
+Uses Ridge regression with LOO-CV. Features are chosen to avoid
+data leakage (no circular use of TVPI/DPI/IRR in both target and features).
 """
 
 import streamlit as st
@@ -13,26 +13,22 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import LeaveOneOut, cross_val_score, cross_val_predict
+from sklearn.model_selection import LeaveOneOut, cross_val_predict
 from sklearn.preprocessing import StandardScaler
 
 
 def _build_pricing_features(funds: pd.DataFrame, quarterly: pd.DataFrame,
                             gps: pd.DataFrame) -> pd.DataFrame:
-    """Build feature matrix for secondary pricing model. All 30 funds get a price."""
+    """Build feature matrix for secondary pricing model. All funds get a price."""
     latest = (quarterly.sort_values("quarter_end")
               .groupby("fund_id").last().reset_index())
     df = funds.merge(latest, on="fund_id", how="left")
     df = df.merge(gps[["gp_id", "gp_name", "track_record_score", "style"]], on="gp_id", how="left")
 
-    # Fill any NaN values from the merge (shouldn't happen, but defensive)
-    df["ending_nav_mm"] = df["ending_nav_mm"].fillna(0)
-    df["tvpi"] = df["tvpi"].fillna(1.0)
-    df["dpi"] = df["dpi"].fillna(0)
-    df["rvpi"] = df["rvpi"].fillna(1.0)
-    df["irr"] = df["irr"].fillna(0)
-    df["cumulative_contributions_mm"] = df["cumulative_contributions_mm"].fillna(
-        df["total_commitment_mm"] * 0.5)
+    # Fill NaNs defensively
+    for col in ["ending_nav_mm", "tvpi", "dpi", "rvpi", "irr",
+                "cumulative_contributions_mm", "cumulative_distributions_mm"]:
+        df[col] = df[col].fillna(0)
     df["track_record_score"] = df["track_record_score"].fillna(0.7)
 
     # Derived features
@@ -42,29 +38,51 @@ def _build_pricing_features(funds: pd.DataFrame, quarterly: pd.DataFrame,
                         df["total_commitment_mm"].clip(lower=0.01)).clip(upper=1.0)
     df["unfunded_ratio"] = 1 - df["pct_funded"]
 
-    # Strategy encoding — ordinal score based on secondary market liquidity
+    # Strategy liquidity score
     strat_map = {
-        "Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.85,
-        "Distressed / Special Sits": 0.88, "Real Estate": 0.90, "Infrastructure": 0.93,
+        "Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.82,
+        "Distressed / Special Sits": 0.85, "Real Estate": 0.88, "Infrastructure": 0.92,
     }
     df["strategy_score"] = df["strategy"].map(strat_map).fillna(0.9)
 
-    # ── Generate synthetic secondary price (the "market price" we're modeling) ──
-    # Formula with wider coefficient spread so the model has a real signal to learn
+    # ── Generate realistic secondary market price ──────────────────
+    # The target variable is generated from TVPI/DPI/IRR (fund performance).
+    # The MODEL features will NOT include TVPI/DPI/IRR — only observable
+    # fund characteristics. This avoids data leakage and produces a
+    # realistic R² in the 0.4-0.7 range.
+    #
+    # Price calibration by vintage:
+    #   2023 J-curve:     70-85% of NAV
+    #   2021-2022 early:  80-90% of NAV
+    #   2019-2020 mid:    85-100% of NAV
+    #   2017-2018 mature: 90-105% of NAV
+    #   2014-2016 late:   95-110% of NAV (strong DPI funds at premium)
     rng = np.random.default_rng(99)
 
+    # Base price driven by vintage maturity
+    vintage_base = {
+        2014: 0.98, 2015: 0.96, 2016: 0.94,
+        2017: 0.91, 2018: 0.89,
+        2019: 0.86, 2020: 0.84,
+        2021: 0.78, 2022: 0.75,
+        2023: 0.70,
+    }
+    df["_vintage_base"] = df["vintage_year"].map(vintage_base).fillna(0.85)
+
+    # Performance adjustments (these use TVPI/DPI/IRR — target only, not features)
+    perf_adj = (
+        + 0.06 * (df["dpi"] - 0.5).clip(lower=-0.3, upper=1.0)   # DPI above avg → premium
+        + 0.04 * (df["tvpi"] - 1.5).clip(lower=-0.5, upper=1.0)  # TVPI above avg → premium
+        - 0.15 * (df["irr"] < -0.02).astype(float)                # negative IRR → deep discount
+        + 0.05 * df["track_record_score"]                          # GP quality
+        - 0.04 * df["unfunded_ratio"]                              # unfunded liability
+    )
+
     df["secondary_price_pct"] = (
-        0.75                                                # base discount
-        + 0.08 * df["dpi"].clip(upper=2.0)                  # high DPI → closer to NAV
-        - 0.08 * df["unfunded_ratio"]                        # unfunded liability discount
-        + 0.12 * df["track_record_score"]                    # GP quality premium
-        + 0.04 * df["tvpi"].clip(upper=3.0)                  # performance premium
-        + 0.06 * df["strategy_score"]                        # strategy liquidity
-        - 0.005 * df["remaining_life_years"].clip(upper=8)   # illiquidity discount
-        + 0.015 * df["fund_age_years"].clip(upper=10)        # mature funds priced tighter
-        - 0.10 * (df["irr"] < 0).astype(float)              # negative IRR penalty
-        + rng.normal(0, 0.025, len(df))                      # market noise
-    ).clip(0.50, 1.20).round(4)
+        df["_vintage_base"] + perf_adj + rng.normal(0, 0.05, len(df))
+    ).clip(0.55, 1.15).round(4)
+
+    df.drop(columns=["_vintage_base"], inplace=True)
 
     return df
 
@@ -77,42 +95,40 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
     df = _build_pricing_features(funds, quarterly, gps)
     n_funds = len(df)
 
-    # ── Feature matrix ─────────────────────────────────────────────
-    feature_cols = ["fund_age_years", "remaining_life_years", "tvpi", "dpi",
-                    "unfunded_ratio", "track_record_score", "strategy_score", "irr"]
+    # ── Model features — NO TVPI/DPI/IRR to avoid leakage ─────────
+    # These are characteristics a buyer can observe before seeing returns
+    feature_cols = ["fund_age_years", "remaining_life_years", "unfunded_ratio",
+                    "track_record_score", "strategy_score", "pct_funded"]
     X = df[feature_cols].fillna(0).values
     y = df["secondary_price_pct"].values
 
-    # Scale features for Ridge
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Ridge regression — much better than gradient boosting for N=30
-    model = Ridge(alpha=1.0)
+    model = Ridge(alpha=2.0)
     model.fit(X_scaled, y)
 
-    # Leave-One-Out CV — compute R² from LOO predictions vs actuals
+    # LOO-CV predictions and R²
     loo = LeaveOneOut()
-    loo_predictions = cross_val_predict(model, X_scaled, y, cv=loo).clip(0.50, 1.20)
-    df["predicted_price"] = loo_predictions
-
-    # R² from LOO predictions: 1 - SS_res/SS_tot
-    ss_res = np.sum((y - loo_predictions) ** 2)
-    ss_tot = np.sum((y - y.mean()) ** 2)
-    cv_r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    loo_pred = cross_val_predict(model, X_scaled, y, cv=loo).clip(0.55, 1.15)
+    df["predicted_price"] = loo_pred
     df["pricing_gap"] = df["predicted_price"] - df["secondary_price_pct"]
 
-    # ── KPIs ───────────────────────────────────────────────────────
+    ss_res = np.sum((y - loo_pred) ** 2)
+    ss_tot = np.sum((y - y.mean()) ** 2)
+    cv_r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    # ── KPIs (shortened labels to prevent truncation) ──────────────
     n_premium = (df["secondary_price_pct"] > 1.01).sum()
     n_discount = (df["secondary_price_pct"] < 0.99).sum()
     n_par = n_funds - n_premium - n_discount
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Avg Secondary Price", f"{df['secondary_price_pct'].mean():.1%} of NAV")
-    k2.metric("Model R² (LOO-CV)", f"{cv_r2:.3f}")
-    k3.metric("Funds at Premium", f"{n_premium}")
-    k4.metric("Funds at Par", f"{n_par}")
-    k5.metric("Funds at Discount", f"{n_discount}")
+    k1.metric("Avg Price", f"{df['secondary_price_pct'].mean():.1%} NAV")
+    k2.metric("Model R²", f"{cv_r2:.2f}")
+    k3.metric("At Premium", f"{n_premium}")
+    k4.metric("At Par", f"{n_par}")
+    k5.metric("At Discount", f"{n_discount}")
 
     st.divider()
 
@@ -133,7 +149,6 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
                          color="strategy", hover_name="fund_name",
                          labels={"secondary_price_pct": "Market Price (% NAV)",
                                  "predicted_price": "Model Price (% NAV)"})
-    # Perfect prediction line
     price_range = [df["secondary_price_pct"].min() - 0.02, df["secondary_price_pct"].max() + 0.02]
     fig_fit.add_trace(go.Scatter(x=price_range, y=price_range, mode="lines",
                                   line=dict(color="gray", dash="dash"), name="Perfect Fit"))
@@ -178,7 +193,7 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
 
     st.divider()
 
-    # ── Feature Importance (Ridge coefficients) ────────────────────
+    # ── Feature Coefficients ───────────────────────────────────────
     st.subheader("Pricing Model — Feature Coefficients")
     st.caption("Ridge regression coefficients (standardised). Positive = increases price, "
                "negative = decreases price.")
@@ -190,7 +205,7 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
     fig_coef = px.bar(coef_df, y="Feature", x="Coefficient", orientation="h",
                       color="Coefficient", color_continuous_scale="RdYlGn",
                       color_continuous_midpoint=0)
-    fig_coef.update_layout(height=400, coloraxis_showscale=False,
+    fig_coef.update_layout(height=350, coloraxis_showscale=False,
                            margin=dict(l=20, r=20, t=30, b=20))
     st.plotly_chart(fig_coef, use_container_width=True)
 
@@ -203,22 +218,20 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
                         "track_record_score", "secondary_price_pct", "predicted_price"]].copy()
     pricing_table["implied_value_mm"] = (pricing_table["ending_nav_mm"] *
                                           pricing_table["secondary_price_pct"])
-
-    # Confidence flag for young funds
     pricing_table["confidence"] = np.where(
         pricing_table["vintage_year"] >= 2023, "Low",
         np.where(pricing_table["vintage_year"] >= 2021, "Medium", "High"))
 
     pricing_table.columns = ["Fund", "GP", "Strategy", "Vintage", "NAV ($M)", "TVPI",
-                             "DPI", "Unfunded %", "GP Score", "Market Price", "Model Price",
+                             "DPI", "Unfunded %", "GP Score", "Mkt Price", "Model Price",
                              "Implied Value ($M)", "Confidence"]
-    pricing_table = pricing_table.sort_values("Market Price", ascending=False)
+    pricing_table = pricing_table.sort_values("Mkt Price", ascending=False)
 
     st.dataframe(
         pricing_table.style.format({
             "NAV ($M)": "{:,.1f}", "TVPI": "{:.2f}x", "DPI": "{:.2f}x",
             "Unfunded %": "{:.1%}", "GP Score": "{:.2f}",
-            "Market Price": "{:.1%}", "Model Price": "{:.1%}",
+            "Mkt Price": "{:.1%}", "Model Price": "{:.1%}",
             "Implied Value ($M)": "{:,.1f}",
         }),
         use_container_width=True, height=500,
@@ -230,30 +243,27 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
     st.subheader("Interactive Pricing Simulator")
     st.caption("Adjust fund parameters to estimate secondary market price.")
 
-    sim_col1, sim_col2, sim_col3 = st.columns(3)
+    sim_col1, sim_col2 = st.columns(2)
     with sim_col1:
-        sim_tvpi = st.slider("TVPI", 0.5, 3.0, 1.5, 0.1, key="sim_tvpi")
-        sim_dpi = st.slider("DPI", 0.0, 2.0, 0.5, 0.1, key="sim_dpi")
-        sim_irr = st.slider("IRR", -0.20, 0.40, 0.12, 0.01, key="sim_irr")
-    with sim_col2:
         sim_age = st.slider("Fund Age (Years)", 1, 15, 6, key="sim_age")
         sim_remaining = st.slider("Remaining Life (Years)", 0, 8, 4, key="sim_remaining")
         sim_unfunded = st.slider("Unfunded Ratio", 0.0, 1.0, 0.3, 0.05, key="sim_unfunded")
-    with sim_col3:
-        sim_gp_score = st.slider("GP Track Record Score", 0.5, 1.0, 0.75, 0.05, key="sim_gp")
+    with sim_col2:
+        sim_gp_score = st.slider("GP Track Record", 0.5, 1.0, 0.75, 0.05, key="sim_gp")
         sim_strat = st.selectbox("Strategy", list(
-            {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.85,
-             "Distressed / Special Sits": 0.88, "Real Estate": 0.90,
-             "Infrastructure": 0.93}.keys()), key="sim_strat_sel")
-        strat_scores = {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.85,
-                        "Distressed / Special Sits": 0.88, "Real Estate": 0.90,
-                        "Infrastructure": 0.93}
+            {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.82,
+             "Distressed / Special Sits": 0.85, "Real Estate": 0.88,
+             "Infrastructure": 0.92}.keys()), key="sim_strat_sel")
+        sim_pct_funded = st.slider("% Funded", 0.0, 1.0, 0.85, 0.05, key="sim_funded")
 
-    sim_raw = np.array([[sim_age, sim_remaining, sim_tvpi, sim_dpi,
-                          sim_unfunded, sim_gp_score, strat_scores[sim_strat], sim_irr]])
+    strat_scores = {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.82,
+                    "Distressed / Special Sits": 0.85, "Real Estate": 0.88,
+                    "Infrastructure": 0.92}
+    sim_raw = np.array([[sim_age, sim_remaining, sim_unfunded, sim_gp_score,
+                          strat_scores[sim_strat], sim_pct_funded]])
     sim_scaled = scaler.transform(sim_raw)
     sim_price = float(model.predict(sim_scaled)[0])
-    sim_price = np.clip(sim_price, 0.50, 1.20)
+    sim_price = np.clip(sim_price, 0.55, 1.15)
 
-    st.metric("Estimated Secondary Price", f"{sim_price:.1%} of NAV",
+    st.metric("Estimated Price", f"{sim_price:.1%} NAV",
               delta=f"{sim_price - 1.0:+.1%} vs par")
