@@ -616,20 +616,50 @@ def generate_cash_flows(quarterly: pd.DataFrame, rng: np.random.Generator) -> pd
 
 def inject_data_quality_issues(quarterly: pd.DataFrame,
                                rng: np.random.Generator) -> pd.DataFrame:
+    """
+    Inject ~150 data quality issues with realistic distribution:
+      nav_mismatch (NAV reconciliation): ~55 (most common)
+      outlier_gain (outlier gain/loss):  ~35
+      fee_spike:                         ~30
+      nav_continuity (beginning NAV):    ~18
+      negative_nav:                      ~7  (rarest, most severe)
+    """
     df = quarterly.copy()
     n = len(df)
-    n_issues = max(1, int(n * 0.05))
-    issue_indices = rng.choice(n, size=n_issues, replace=False)
+
+    # Total issues: ~15% of records
+    n_issues = max(10, int(n * 0.15))
+    issue_indices = rng.choice(n, size=min(n_issues, n), replace=False)
+
+    # Weighted type selection matching target distribution
+    issue_types = ["nav_mismatch", "outlier_gain", "fee_spike", "nav_continuity", "negative_nav"]
+    issue_weights = [0.38, 0.24, 0.20, 0.12, 0.06]  # sums to 1.0
+
     for idx in issue_indices:
-        issue_type = rng.choice(["nav_mismatch", "outlier_gain", "negative_nav", "fee_spike"])
+        issue_type = rng.choice(issue_types, p=issue_weights)
+
         if issue_type == "nav_mismatch":
-            df.loc[df.index[idx], "beginning_nav_mm"] *= float(rng.uniform(0.8, 0.95))
+            # Break NAV reconciliation: corrupt gains_losses so
+            # beginning + contributions - fees + gains - distributions ≠ ending
+            df.loc[df.index[idx], "gains_losses_mm"] *= float(rng.uniform(1.3, 2.5))
+
         elif issue_type == "outlier_gain":
+            # Abnormally large markup or markdown
             df.loc[df.index[idx], "gains_losses_mm"] *= float(rng.uniform(3, 8))
-        elif issue_type == "negative_nav":
-            df.loc[df.index[idx], "ending_nav_mm"] = -abs(df.loc[df.index[idx], "ending_nav_mm"])
+
         elif issue_type == "fee_spike":
-            df.loc[df.index[idx], "mgmt_fees_mm"] *= float(rng.uniform(5, 15))
+            # Fee abnormally high relative to NAV
+            df.loc[df.index[idx], "mgmt_fees_mm"] *= float(rng.uniform(4, 10))
+
+        elif issue_type == "nav_continuity":
+            # Ending NAV of period N ≠ beginning NAV of period N+1
+            df.loc[df.index[idx], "beginning_nav_mm"] *= float(rng.uniform(0.75, 0.92))
+
+        elif issue_type == "negative_nav":
+            # NAV below zero (rare, severe)
+            df.loc[df.index[idx], "ending_nav_mm"] = -abs(
+                df.loc[df.index[idx], "ending_nav_mm"]) * float(rng.uniform(0.1, 0.5))
+
     return df
 
 
