@@ -18,12 +18,21 @@ from sklearn.preprocessing import StandardScaler
 
 
 def _build_pricing_features(funds: pd.DataFrame, quarterly: pd.DataFrame,
-                            gps: pd.DataFrame) -> pd.DataFrame:
+                            gps: pd.DataFrame, holdings: pd.DataFrame = None) -> pd.DataFrame:
     """Build feature matrix for secondary pricing model. All funds get a price."""
     latest = (quarterly.sort_values("quarter_end")
               .groupby("fund_id").last().reset_index())
     df = funds.merge(latest, on="fund_id", how="left")
     df = df.merge(gps[["gp_id", "gp_name", "track_record_score", "style"]], on="gp_id", how="left")
+
+    # Remaining portfolio companies per fund (from holdings)
+    if holdings is not None and len(holdings) > 0:
+        co_counts = holdings.groupby("fund_id")["company_id"].nunique().reset_index()
+        co_counts.columns = ["fund_id", "n_companies"]
+        df = df.merge(co_counts, on="fund_id", how="left")
+        df["n_companies"] = df["n_companies"].fillna(5).astype(int)
+    else:
+        df["n_companies"] = 5
 
     # Fill NaNs defensively
     for col in ["ending_nav_mm", "tvpi", "dpi", "rvpi", "irr",
@@ -105,18 +114,22 @@ def _build_pricing_features(funds: pd.DataFrame, quarterly: pd.DataFrame,
     return df
 
 
-def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
+def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame,
+           holdings: pd.DataFrame = None):
     st.header("Secondary Pricing Model")
     st.caption("Estimate secondary market bid price as % of NAV using fund characteristics, "
                "GP track record, and market dynamics.")
 
-    df = _build_pricing_features(funds, quarterly, gps)
+    df = _build_pricing_features(funds, quarterly, gps, holdings)
     n_funds = len(df)
 
-    # ── Model features — NO TVPI/DPI/IRR to avoid leakage ─────────
-    # These are characteristics a buyer can observe before seeing returns
-    feature_cols = ["fund_age_years", "remaining_life_years", "unfunded_ratio",
-                    "track_record_score", "strategy_score", "pct_funded"]
+    # ── Model features ─────────────────────────────────────────────
+    # DPI is safe: measures what's already been returned, not current NAV.
+    # n_companies: fewer remaining positions = more concentrated risk.
+    # NO TVPI/IRR/NAV to avoid leakage with the target variable.
+    feature_cols = ["fund_age_years", "remaining_life_years", "dpi",
+                    "unfunded_ratio", "track_record_score", "strategy_score",
+                    "n_companies", "pct_funded"]
     X = df[feature_cols].fillna(0).values
     y = df["secondary_price_pct"].values
 
@@ -261,24 +274,28 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
     st.subheader("Interactive Pricing Simulator")
     st.caption("Adjust fund parameters to estimate secondary market price.")
 
-    sim_col1, sim_col2 = st.columns(2)
+    sim_col1, sim_col2, sim_col3 = st.columns(3)
     with sim_col1:
         sim_age = st.slider("Fund Age (Years)", 1, 15, 6, key="sim_age")
         sim_remaining = st.slider("Remaining Life (Years)", 0, 8, 4, key="sim_remaining")
-        sim_unfunded = st.slider("Unfunded Ratio", 0.0, 1.0, 0.3, 0.05, key="sim_unfunded")
+        sim_dpi = st.slider("DPI", 0.0, 2.5, 0.5, 0.1, key="sim_dpi")
     with sim_col2:
+        sim_unfunded = st.slider("Unfunded Ratio", 0.0, 1.0, 0.3, 0.05, key="sim_unfunded")
         sim_gp_score = st.slider("GP Track Record", 0.5, 1.0, 0.75, 0.05, key="sim_gp")
+        sim_pct_funded = st.slider("% Funded", 0.0, 1.0, 0.85, 0.05, key="sim_funded")
+    with sim_col3:
         sim_strat = st.selectbox("Strategy", list(
             {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.82,
              "Distressed / Special Sits": 0.85, "Real Estate": 0.88,
              "Infrastructure": 0.92}.keys()), key="sim_strat_sel")
-        sim_pct_funded = st.slider("% Funded", 0.0, 1.0, 0.85, 0.05, key="sim_funded")
+        sim_n_cos = st.slider("Remaining Companies", 1, 15, 7, key="sim_ncos")
 
     strat_scores = {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.82,
                     "Distressed / Special Sits": 0.85, "Real Estate": 0.88,
                     "Infrastructure": 0.92}
-    sim_raw = np.array([[sim_age, sim_remaining, sim_unfunded, sim_gp_score,
-                          strat_scores[sim_strat], sim_pct_funded]])
+    # Feature order: fund_age, remaining_life, dpi, unfunded, gp_score, strategy, n_companies, pct_funded
+    sim_raw = np.array([[sim_age, sim_remaining, sim_dpi, sim_unfunded, sim_gp_score,
+                          strat_scores[sim_strat], sim_n_cos, sim_pct_funded]])
     sim_scaled = scaler.transform(sim_raw)
     sim_price = float(model.predict(sim_scaled)[0])
     sim_price = np.clip(sim_price, 0.55, 1.15)

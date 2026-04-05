@@ -111,7 +111,7 @@ elif module == "GP Behavior Engine":
 
 elif module == "Secondary Pricing":
     from modules.pricing import render
-    render(funds, quarterly, gps)
+    render(funds, quarterly, gps, holdings)
 
 elif module == "Data Validation & QA":
     from modules.validation import render
