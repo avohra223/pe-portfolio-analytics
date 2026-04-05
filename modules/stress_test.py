@@ -203,21 +203,28 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, companies: pd.DataFrame
     # ── Fund-Level Impact ──────────────────────────────────────────
     st.subheader("Fund-Level NAV Impact")
 
-    fund_display = fund_impact.sort_values("nav_change_pct")
+    # Sort by impact %: most vulnerable (largest decline) on the left
+    fund_display = fund_impact.sort_values("nav_change_pct", ascending=True)
+    fund_names = fund_display["fund_name"].tolist()
+
     fig_waterfall = go.Figure()
+    # Full base NAV bar (blue)
     fig_waterfall.add_trace(go.Bar(
-        x=fund_display["fund_name"], y=fund_display["ending_nav_mm"],
-        name="Base NAV", marker_color="#3498db", opacity=0.7,
+        x=fund_names, y=fund_display["ending_nav_mm"],
+        name="Base NAV", marker_color="#3498db",
+        width=0.7,
     ))
+    # Stressed NAV overlaid as narrower bar — the gap at top = loss
     fig_waterfall.add_trace(go.Bar(
-        x=fund_display["fund_name"], y=fund_display["total_impact_mm"],
-        name="Stress Impact", marker_color=np.where(
-            fund_display["total_impact_mm"] < 0, "#e74c3c", "#2ecc71"),
+        x=fund_names, y=fund_display["stressed_nav_mm"],
+        name="Stressed NAV", marker_color="#2c3e50",
+        width=0.5,
     ))
     fig_waterfall.update_layout(
-        barmode="relative", height=450,
+        barmode="overlay", height=450,
         yaxis_title="NAV ($M)", xaxis_tickangle=45,
         margin=dict(l=20, r=20, t=30, b=100),
+        xaxis={"categoryorder": "array", "categoryarray": fund_names},
     )
     st.plotly_chart(fig_waterfall, use_container_width=True)
 
