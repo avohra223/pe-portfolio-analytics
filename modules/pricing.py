@@ -69,20 +69,38 @@ def _build_pricing_features(funds: pd.DataFrame, quarterly: pd.DataFrame,
     }
     df["_vintage_base"] = df["vintage_year"].map(vintage_base).fillna(0.85)
 
+    # Strategy-level pricing adjustment (liquidity / complexity premium/discount)
+    # Buyout: most liquid, trades near par → +5%
+    # Growth: slightly less liquid → +2%
+    # Infra: stable but illiquid → 0%
+    # RE: valuation uncertainty → -4%
+    # Distressed: hard to value, binary outcomes → -8%
+    # VC: highest uncertainty, longest duration → -12%
+    strat_price_adj = {
+        "Buyout": 0.05,
+        "Growth Equity": 0.02,
+        "Infrastructure": 0.00,
+        "Real Estate": -0.04,
+        "Distressed / Special Sits": -0.08,
+        "Venture Capital": -0.12,
+    }
+    df["_strat_adj"] = df["strategy"].map(strat_price_adj).fillna(0)
+
     # Performance adjustments (these use TVPI/DPI/IRR — target only, not features)
     perf_adj = (
-        + 0.06 * (df["dpi"] - 0.5).clip(lower=-0.3, upper=1.0)   # DPI above avg → premium
-        + 0.04 * (df["tvpi"] - 1.5).clip(lower=-0.5, upper=1.0)  # TVPI above avg → premium
-        - 0.15 * (df["irr"] < -0.02).astype(float)                # negative IRR → deep discount
-        + 0.05 * df["track_record_score"]                          # GP quality
-        - 0.04 * df["unfunded_ratio"]                              # unfunded liability
+        df["_strat_adj"]                                              # strategy liquidity
+        + 0.06 * (df["dpi"] - 0.5).clip(lower=-0.3, upper=1.0)      # DPI above avg → premium
+        + 0.04 * (df["tvpi"] - 1.5).clip(lower=-0.5, upper=1.0)     # TVPI above avg → premium
+        - 0.15 * (df["irr"] < -0.02).astype(float)                   # negative IRR → deep discount
+        + 0.05 * df["track_record_score"]                             # GP quality
+        - 0.04 * df["unfunded_ratio"]                                 # unfunded liability
     )
 
     df["secondary_price_pct"] = (
         df["_vintage_base"] + perf_adj + rng.normal(0, 0.05, len(df))
     ).clip(0.55, 1.15).round(4)
 
-    df.drop(columns=["_vintage_base"], inplace=True)
+    df.drop(columns=["_vintage_base", "_strat_adj"], inplace=True)
 
     return df
 
