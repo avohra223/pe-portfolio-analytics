@@ -22,12 +22,13 @@ def _compute_gp_metrics(quarterly: pd.DataFrame, funds: pd.DataFrame,
     q["quarter_end"] = pd.to_datetime(q["quarter_end"])
     q = q.sort_values(["fund_id", "quarter_end"])
 
-    # Quarter-over-quarter NAV change rate (markup/markdown)
-    q["nav_change_pct"] = q.groupby("fund_id")["ending_nav_mm"].pct_change()
+    # Quarter-over-quarter gain/loss as % of cumulative invested capital
+    # This avoids inflated % changes when NAV base is small (early quarters)
+    q["nav_change_pct"] = q["gains_losses_mm"] / q["cumulative_contributions_mm"].clip(lower=0.01)
 
     # Classify as markup or markdown
-    q["markup"] = q["nav_change_pct"] > 0.01
-    q["markdown"] = q["nav_change_pct"] < -0.01
+    q["markup"] = q["nav_change_pct"] > 0.005
+    q["markdown"] = q["nav_change_pct"] < -0.005
 
     # Fund age in quarters
     q["fund_age_q"] = q.groupby("fund_id").cumcount() + 1

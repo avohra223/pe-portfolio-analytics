@@ -383,10 +383,33 @@ def _simulate_fund(n_quarters: int, vintage: int, strategy: str,
     fee_rate_invest = float(rng.uniform(0.004, 0.005))
     fee_rate_harvest = float(rng.uniform(0.003, 0.004))
 
-    # Pre-compute a smooth NAV target curve
-    # J-curve: dip years 1-2, value creation years 3-7, harvest years 8+
+    # Pre-compute NAV target curve using a proper J-curve on TVPI
+    # TVPI path over fund life:
+    #   Q1-Q8  (yrs 1-2): TVPI 0.85-0.95 (below cost — fees, early write-downs)
+    #   Q9-Q16 (yrs 3-4): TVPI ~1.0 (breakeven, starting to create value)
+    #   Q17-Q28 (yrs 5-7): TVPI ramps to near target (value creation)
+    #   Q29+   (yrs 8+):  TVPI at target (harvesting, NAV declines via distributions)
     cum_calls = np.cumsum(calls)
     cum_dists = np.cumsum(dists)
+
+    # Build a TVPI curve over the fund's life
+    tvpi_curve = np.zeros(n_quarters)
+    for q in range(n_quarters):
+        age_frac = q / max(n_quarters - 1, 1)
+        if age_frac < 0.20:
+            # Years 1-2: J-curve dip. TVPI drops from 1.0 to ~0.88
+            tvpi_curve[q] = 1.0 - 0.12 * (age_frac / 0.20)
+        elif age_frac < 0.40:
+            # Years 3-4: recovery to breakeven
+            progress = (age_frac - 0.20) / 0.20
+            tvpi_curve[q] = 0.88 + 0.12 * progress  # back to ~1.0
+        elif age_frac < 0.75:
+            # Years 5-7.5: main value creation — TVPI ramps to target
+            progress = (age_frac - 0.40) / 0.35
+            tvpi_curve[q] = 1.0 + progress * (target_tvpi - 1.0)
+        else:
+            # Years 8+: at target TVPI, harvesting
+            tvpi_curve[q] = target_tvpi
 
     current_nav = 0.0
     for q in range(n_quarters):
@@ -399,33 +422,19 @@ def _simulate_fund(n_quarters: int, vintage: int, strategy: str,
             fee = max(current_nav, 0) * fee_rate_harvest
         mgmt_fees[q] = fee
 
-        # What should NAV be at this point?
+        # NAV target: TVPI_curve * cum_calls - cum_dists
         if q == n_quarters - 1:
-            # Final quarter: hit target
             nav_target = target_final_nav
         else:
-            # Smooth interpolation with J-curve shape
-            if age_frac < 0.15:
-                # J-curve dip: NAV < called capital (fees + early losses)
-                value_mult = 0.85 + age_frac * 0.5 + style["markup_bias"] * 2
-            elif age_frac < 0.45:
-                # Value creation: NAV grows above cost
-                creation_progress = (age_frac - 0.15) / 0.30
-                value_mult = 0.92 + creation_progress * (target_tvpi - 1.0) * 0.6
-            else:
-                # Harvest: NAV = remaining value after distributions
-                harvest_progress = (age_frac - 0.45) / 0.55
-                # Value continues to grow but distributions reduce NAV
-                peak_mult = 0.92 + (target_tvpi - 1.0) * 0.6
-                value_mult = peak_mult * (1 + harvest_progress * 0.3)
-
-            nav_target = cum_calls[q] * value_mult - cum_dists[q]
+            total_value_target = tvpi_curve[q] * cum_calls[q]
+            nav_target = total_value_target - cum_dists[q]
             nav_target = max(0, nav_target)
 
         # Gain = what's needed to reach target, plus small noise
         needed_gain = nav_target - (current_nav + calls[q] - fee - dists[q])
-        noise = float(rng.normal(0, abs(needed_gain) * 0.08 + 0.2))
-        gain = needed_gain + noise + style["markup_bias"] * current_nav
+        noise_scale = max(abs(needed_gain) * 0.06, 0.1)
+        noise = float(rng.normal(0, noise_scale)) + style["markup_bias"] * current_nav
+        gain = needed_gain + noise
 
         gains[q] = gain
 
