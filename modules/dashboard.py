@@ -21,6 +21,29 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, cash_flows: pd.DataFram
     fund_perf = funds.merge(latest_q, on="fund_id", how="left")
     fund_perf = fund_perf.merge(gps[["gp_id", "gp_name"]], on="gp_id", how="left")
 
+    with st.expander("ℹ️ What are IRR, TVPI, DPI, and RVPI?"):
+        st.markdown("""
+**IRR** (Internal Rate of Return) is the annualised return accounting for the timing of cash flows.
+Computed here using XIRR (Brent's method) from actual dated capital calls and distributions — not approximated.
+
+**TVPI** (Total Value to Paid-In) = (Cumulative Distributions + Current NAV) / Cumulative Paid-In Capital.
+Measures total value created per dollar invested. A TVPI of 1.8x means $1.80 of total value for every $1.00 invested.
+
+**DPI** (Distributions to Paid-In) = Cumulative Distributions / Paid-In Capital.
+Measures what's actually been returned in cash. DPI of 1.0x means the fund has fully returned investors' capital.
+
+**RVPI** (Residual Value to Paid-In) = Current NAV / Paid-In Capital.
+Measures unrealised value still in the fund. TVPI = DPI + RVPI always holds.
+""")
+
+    with st.expander("ℹ️ What is the J-curve?"):
+        st.markdown("""
+PE funds typically show negative or flat returns in years 1-3 because management fees and setup costs
+reduce NAV before investments generate returns. Performance inflects positive as portfolio companies
+grow and are exited, usually from year 3-4 onward. The pattern of early losses followed by later gains
+creates a J-shaped return curve when plotted over time.
+""")
+
     # ── KPI cards ──────────────────────────────────────────────────
     col1, col2, col3, col4, col5 = st.columns(5)
     total_nav = fund_perf["ending_nav_mm"].sum()
@@ -139,6 +162,13 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, cash_flows: pd.DataFram
 
     # ── Cash Flow Timeline ─────────────────────────────────────────
     st.subheader("Aggregate Cash Flow Timeline")
+    with st.expander("ℹ️ How to read this chart"):
+        st.markdown("""
+Red bars (negative) are **capital calls** — money flowing from the LP into the fund.
+Green bars (positive) are **distributions** — money flowing back from the fund to the LP.
+Net cash flow turns positive when the portfolio starts returning more capital than it's calling.
+Early years are dominated by capital calls (investment period); later years by distributions (harvest period).
+""")
     cf = cash_flows.copy()
     cf["date"] = pd.to_datetime(cf["date"])
     cf["quarter"] = cf["date"].dt.to_period("Q").astype(str)

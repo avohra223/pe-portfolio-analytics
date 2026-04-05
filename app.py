@@ -73,8 +73,29 @@ with st.sidebar:
     )
 
     st.divider()
-    st.caption("**Dataset:** 30 funds | 200 companies | 10 vintages")
-    st.caption("Synthetic data for demonstration purposes")
+
+    with st.expander("About This Platform"):
+        st.markdown("""
+A portfolio analytics platform for institutional investors (LPs) and secondaries
+firms to monitor, stress test, and price their private equity fund portfolios.
+
+**Who it's for:** Limited Partners managing diversified PE allocations, secondaries
+buyers evaluating fund interests, fund administrators performing data quality checks,
+and risk teams running scenario analysis.
+
+**Dataset:** 30 synthetic PE funds across 12 GPs, 6 strategies, 10 vintages
+(2014-2023), and 200 portfolio companies — designed to mirror a realistic
+institutional PE portfolio.
+
+**Modules:**
+- **Portfolio Dashboard** — fund performance, exposure breakdowns, cash flow timelines
+- **Concentration Risk** — entity overlaps across funds, sector/geography heatmaps
+- **GP Behavior Engine** — markup/markdown patterns, NAV trajectory forecasting
+- **Secondary Pricing** — estimate bid price as % of NAV using fund characteristics
+- **Data Validation & QA** — automated checks for data quality issues
+- **Macro Stress Test** — model how macro shocks impact portfolio NAV
+""")
+
     st.caption("Synthetic data for demonstration")
 
 

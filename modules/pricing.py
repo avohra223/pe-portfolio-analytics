@@ -120,6 +120,26 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame,
     st.caption("Estimate secondary market bid price as % of NAV using fund characteristics, "
                "GP track record, and market dynamics.")
 
+    with st.expander("ℹ️ What is secondary pricing?"):
+        st.markdown("""
+When an LP wants to sell their fund interest before the fund matures, the transaction happens on the
+**secondary market**. The price is expressed as a percentage of the fund's reported NAV. A price of 90%
+means the buyer pays 90 cents for every dollar of reported NAV. Buyout funds with strong DPI typically
+trade near par (95-105%), while young VC funds in J-curve may trade at 70-85%.
+""")
+
+    with st.expander("ℹ️ How the pricing model works"):
+        st.markdown("""
+A **Ridge regression** model estimates secondary price as % of NAV using fund characteristics that a buyer
+can observe: fund age, strategy, DPI (distributions to paid-in), GP track record, remaining portfolio
+companies, unfunded commitment ratio, and remaining fund life. TVPI and IRR are excluded from features
+to avoid data leakage (they are used to generate the target price but not as model inputs).
+
+The model is validated using **Leave-One-Out cross-validation** on 30 funds — each fund is held out once
+and the model is retrained on the remaining 29. R-squared measures how well the model explains price
+variation (1.0 = perfect, 0.0 = no predictive power).
+""")
+
     df = _build_pricing_features(funds, quarterly, gps, holdings)
     n_funds = len(df)
 
@@ -226,6 +246,13 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame,
 
     # ── Feature Coefficients ───────────────────────────────────────
     st.subheader("Pricing Model — Feature Coefficients")
+    with st.expander("ℹ️ What the coefficients mean"):
+        st.markdown("""
+Each bar shows how much a one-standard-deviation increase in that feature moves the predicted secondary
+price, holding all else equal. Positive coefficients increase price (e.g. higher DPI = safer bet = higher
+price). Negative coefficients decrease it (e.g. more remaining life = more illiquidity = lower price).
+Coefficients are standardised so features with different scales can be compared directly.
+""")
     st.caption("Ridge regression coefficients (standardised). Positive = increases price, "
                "negative = decreases price.")
     coef_df = pd.DataFrame({
@@ -309,6 +336,12 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame,
     # ── Interactive Pricing Simulator ──────────────────────────────
     st.subheader("Interactive Pricing Simulator")
     st.caption("Adjust fund parameters to estimate secondary market price.")
+    with st.expander("ℹ️ How to use the simulator"):
+        st.markdown("""
+Adjust the sliders to model a hypothetical fund and see how its characteristics affect the estimated
+secondary market price. Useful for scenario analysis — for example, "what would happen to the price
+if the fund had a higher DPI?" or "how much does GP track record matter for pricing?"
+""")
 
     sim_col1, sim_col2, sim_col3 = st.columns(3)
     with sim_col1:

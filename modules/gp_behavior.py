@@ -41,6 +41,20 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
     st.caption("Analyze historical GP behavior patterns — markup/markdown tendencies, "
                "distribution timing, and fund life management. Predict future NAV trajectory.")
 
+    with st.expander("ℹ️ What are GP behavioral archetypes?"):
+        st.markdown("""
+GPs (General Partners — the fund managers) are classified as **aggressive**, **conservative**, or **balanced**
+based on how frequently they mark up or mark down their portfolio valuations each quarter.
+
+- **Aggressive** GPs adjust NAV more often in both directions — they recognise gains quickly but also take
+  write-downs early. Expect higher markup frequency (~65-75%) but also higher markdown frequency (~20-30%).
+- **Conservative** GPs hold valuations steadier, delaying recognition of both gains and losses. Fewer markups
+  (~45-55%) and fewer markdowns (~15-20%) — a smoother, more predictable NAV path.
+- **Balanced** GPs fall between the two extremes.
+
+These patterns are derived from historical quarterly NAV changes across each GP's fund portfolio.
+""")
+
     q = _compute_gp_metrics(quarterly, funds, gps)
 
     # ── GP Selector ────────────────────────────────────────────────
@@ -66,6 +80,16 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
 
     # ── Markup / Markdown Pattern Over Fund Life ───────────────────
     st.subheader("Markup/Markdown Pattern by Fund Age")
+    with st.expander("ℹ️ What this chart shows"):
+        st.markdown("""
+Green/red bars show the **average quarterly gain or loss as a percentage of cumulative invested capital**
+at each fund age. The blue line shows the **rolling 4-quarter average markup rate** — the percentage
+of funds showing positive NAV changes at that age.
+
+Early J-curve quarters (Q1-Q6) typically show negative changes and low markup rates as fees drag NAV
+below cost. Mid-life quarters (Q12-Q28) show the strongest positive changes as value creation peaks.
+Late quarters show declining rates as remaining positions become harder to exit.
+""")
 
     age_pattern = (gp_data.groupby("fund_age_q")
                    .agg(avg_nav_change=("nav_change_pct", "mean"),
@@ -155,6 +179,16 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame):
 
     # ── NAV Trajectory Forecast ───────────────────────────────────
     st.subheader("NAV Trajectory Forecast")
+    with st.expander("ℹ️ How the NAV forecast works"):
+        st.markdown("""
+A **piecewise regression model** fits the historical NAV path for each fund. Pre-peak, a polynomial
+captures the investment and value creation ramp. Post-peak, a slower **exponential decay** models the
+distribution and wind-down phase — reflecting how the last few portfolio companies are held and exited
+opportunistically over several years, creating a long flat tail rather than a symmetric decline.
+
+The shaded band shows a **95% confidence interval** that widens in the forecast region to reflect
+increasing uncertainty.
+""")
 
     fund_options = dict(zip(gp_funds["fund_name"], gp_funds["fund_id"]))
     if fund_options:

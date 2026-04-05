@@ -141,6 +141,24 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, companies: pd.DataFrame
     st.caption("Model how macro shocks propagate through portfolio companies "
                "to fund and portfolio-level NAV.")
 
+    with st.expander("ℹ️ How stress scenarios work"):
+        st.markdown("""
+Each scenario defines a set of macro shocks — rate changes, recession severity, inflation, and
+sector-specific impacts. These shocks propagate to portfolio companies based on **sector sensitivity
+betas** (e.g. Real Estate is highly sensitive to rate hikes, Healthcare is defensive). The company-level
+impacts are then weighted by strategy leverage factors and aggregated from company level to fund level
+to portfolio level. Calibrated so a deep recession produces ~25-35% portfolio NAV decline (consistent
+with 2008 GFC PE drawdowns).
+""")
+
+    with st.expander("ℹ️ Severity multiplier & custom parameters"):
+        st.markdown("""
+The **severity multiplier** scales the intensity of any scenario. At 1.0x it runs at default severity.
+At 2.0x all shocks are doubled. The custom parameter sliders below each scenario let you override
+individual shock components — for example, run a Deep Recession scenario but with a custom rate change.
+Switching scenarios resets the sliders to that scenario's defaults.
+""")
+
     # ── Scenario Selection ─────────────────────────────────────────
     left_sel, right_sel = st.columns([2, 1])
 
@@ -270,6 +288,13 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, companies: pd.DataFrame
 
     # ── Scenario Comparison ────────────────────────────────────────
     st.subheader("Scenario Comparison Matrix")
+    with st.expander("ℹ️ How to read the comparison"):
+        st.markdown("""
+Bars show the total portfolio NAV impact under each preset scenario at default severity (1.0x).
+This helps identify which macro risks pose the greatest threat to the portfolio. Scenarios are
+ordered from mildest to most severe impact. The table below shows the exact dollar and percentage
+impact for each scenario.
+""")
     comparison = []
     for sname, sconfig in SCENARIOS.items():
         sc = {k: v for k, v in sconfig.items() if k not in ["description", "target_sector"]}

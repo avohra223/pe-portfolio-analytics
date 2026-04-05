@@ -18,6 +18,14 @@ def render(funds: pd.DataFrame, companies: pd.DataFrame, holdings: pd.DataFrame,
     st.caption("Identifies portfolio companies held across multiple funds, "
                "revealing hidden sector, geographic, and entity-level concentration.")
 
+    with st.expander("ℹ️ What is concentration risk?"):
+        st.markdown("""
+Concentration risk arises when multiple funds in the portfolio are exposed to the same underlying companies,
+sectors, or geographies. A single adverse event — like a sector downturn or a company bankruptcy — could
+impact several funds simultaneously, amplifying losses beyond what diversification metrics suggest.
+This module identifies these hidden overlaps by matching company IDs across the holdings table.
+""")
+
     # ── Enriched holdings ──────────────────────────────────────────
     h = (holdings
          .merge(companies, on="company_id", how="left")
@@ -45,8 +53,13 @@ def render(funds: pd.DataFrame, companies: pd.DataFrame, holdings: pd.DataFrame,
 
     # ── Entity Overlap Network Graph ───────────────────────────────
     st.subheader("Entity Overlap Network")
-    st.caption("Funds are connected when they share a portfolio company. "
-               "Thicker edges = more shared companies.")
+    with st.expander("ℹ️ How to read the network graph"):
+        st.markdown("""
+Each **node** represents a fund. An **edge** (line) connects two funds when they share at least one
+portfolio company. Thicker edges mean more shared holdings. Larger, darker nodes have higher total
+overlap weight — they are the most interconnected funds. Clusters of tightly connected nodes indicate
+groups of funds with significant shared exposure.
+""")
 
     # Build adjacency: fund-to-fund via shared companies
     overlap_detail = overlap_holdings.groupby("company_id")["fund_id"].apply(list).reset_index()

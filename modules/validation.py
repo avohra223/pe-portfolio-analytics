@@ -134,6 +134,32 @@ def render(quarterly_dirty: pd.DataFrame, funds: pd.DataFrame, gps: pd.DataFrame
     st.caption("Automated quality checks on fund financial data. "
                "Issues are flagged with severity levels and actionable detail.")
 
+    with st.expander("ℹ️ What checks are performed"):
+        st.markdown("""
+Six automated checks run on every quarterly record:
+
+1. **NAV Continuity** — does the ending NAV of quarter N match the beginning NAV of quarter N+1?
+2. **NAV Reconciliation** — does beginning NAV + contributions - fees + gains - distributions = ending NAV?
+3. **Negative NAV** — is any reported NAV below zero? (rare and severe)
+4. **Outlier Gain/Loss** — are any quarterly gains or losses more than 3 standard deviations from the fund's historical average?
+5. **Fee Spike** — are management fees in any quarter abnormally high relative to NAV (>2% in a single quarter)?
+6. **TVPI/DPI Consistency** — does DPI exceed TVPI? (impossible if data is correct, since TVPI = DPI + RVPI)
+""")
+
+    with st.expander("ℹ️ How severity is assigned"):
+        st.markdown("""
+- **Critical** — requires immediate attention, likely a data error (e.g. negative NAV)
+- **High** — significant anomaly that needs investigation (e.g. large NAV reconciliation break, >$5M)
+- **Medium** — minor inconsistency worth flagging (e.g. slightly elevated fee, moderate outlier)
+""")
+
+    with st.expander("ℹ️ How the data quality score works"):
+        st.markdown("""
+Starts at 100 and deducts points based on issue count weighted by severity, normalised by total records.
+Critical issues penalise 5x, High 2x, Medium 1x. Formula: `100 - ((Critical×5 + High×2 + Medium×1) / Total Records × 100)`.
+Score bands: **Good** (85+), **Acceptable** (65-84), **Needs Improvement** (40-64), **Critical** (<40).
+""")
+
     issues_df = _run_validation(quarterly_dirty, funds)
 
     # ── Summary KPIs ───────────────────────────────────────────────
