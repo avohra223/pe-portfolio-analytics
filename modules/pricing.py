@@ -316,15 +316,17 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame,
         sim_remaining = st.slider("Remaining Life (Years)", 0, 8, 4, key="sim_remaining")
         sim_dpi = st.slider("DPI", 0.0, 2.5, 0.5, 0.1, key="sim_dpi")
     with sim_col2:
-        sim_unfunded = st.slider("Unfunded Ratio", 0.0, 1.0, 0.3, 0.05, key="sim_unfunded")
-        sim_gp_score = st.slider("GP Track Record", 0.5, 1.0, 0.75, 0.05, key="sim_gp")
         sim_pct_funded = st.slider("% Funded", 0.0, 1.0, 0.85, 0.05, key="sim_funded")
+        st.caption(f"Unfunded ratio: **{1 - sim_pct_funded:.0%}**")
+        sim_gp_score = st.slider("GP Track Record", 0.5, 1.0, 0.75, 0.05, key="sim_gp")
     with sim_col3:
         sim_strat = st.selectbox("Strategy", list(
             {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.82,
              "Distressed / Special Sits": 0.85, "Real Estate": 0.88,
              "Infrastructure": 0.92}.keys()), key="sim_strat_sel")
         sim_n_cos = st.slider("Remaining Companies", 1, 15, 7, key="sim_ncos")
+
+    sim_unfunded = 1.0 - sim_pct_funded  # derived, not independent
 
     strat_scores = {"Buyout": 1.0, "Growth Equity": 0.95, "Venture Capital": 0.82,
                     "Distressed / Special Sits": 0.85, "Real Estate": 0.88,
