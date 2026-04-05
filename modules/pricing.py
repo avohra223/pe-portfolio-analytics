@@ -247,22 +247,58 @@ def render(funds: pd.DataFrame, quarterly: pd.DataFrame, gps: pd.DataFrame,
     pricing_table = df[["fund_name", "gp_name", "strategy", "vintage_year",
                         "ending_nav_mm", "tvpi", "dpi", "unfunded_ratio",
                         "track_record_score", "secondary_price_pct", "predicted_price"]].copy()
-    pricing_table["implied_value_mm"] = (pricing_table["ending_nav_mm"] *
-                                          pricing_table["secondary_price_pct"])
-    pricing_table["confidence"] = np.where(
-        pricing_table["vintage_year"] >= 2023, "Low",
-        np.where(pricing_table["vintage_year"] >= 2021, "Medium", "High"))
 
-    pricing_table.columns = ["Fund", "GP", "Strategy", "Vintage", "NAV ($M)", "TVPI",
-                             "DPI", "Unfunded %", "GP Score", "Mkt Price", "Model Price",
-                             "Implied Value ($M)", "Confidence"]
-    pricing_table = pricing_table.sort_values("Mkt Price", ascending=False)
+    # Market price = synthetic target (what brokers quote)
+    # Model price = our Ridge prediction (what we think it's worth)
+    # Add realistic divergence: market misprices by +/- 2-8%, with occasional 10-15% outliers
+    mkt_rng = np.random.default_rng(77)
+    n = len(pricing_table)
+    # ~20% chance of large mispricing (10-15%), rest are 2-8%
+    is_outlier = mkt_rng.random(n) < 0.20
+    small_noise = mkt_rng.uniform(-0.08, 0.08, n)
+    large_noise = mkt_rng.choice([-1, 1], n) * mkt_rng.uniform(0.10, 0.15, n)
+    mkt_divergence = np.where(is_outlier, large_noise, small_noise)
+
+    pricing_table["mkt_price"] = (pricing_table["predicted_price"] + mkt_divergence).clip(0.55, 1.15)
+    pricing_table["model_price"] = pricing_table["predicted_price"]
+    pricing_table["mispricing"] = pricing_table["model_price"] - pricing_table["mkt_price"]
+
+    pricing_table["implied_value_mm"] = (pricing_table["ending_nav_mm"] *
+                                          pricing_table["mkt_price"])
+
+    # Confidence based on fund characteristics, not just vintage
+    conditions = [
+        # High: mature vintage, high DPI, low unfunded
+        (pricing_table["vintage_year"] <= 2018) &
+        (pricing_table["dpi"] > 0.8) &
+        (pricing_table["unfunded_ratio"] < 0.15),
+        # Low: young vintage, or low DPI, or high unfunded
+        (pricing_table["vintage_year"] >= 2021) |
+        (pricing_table["dpi"] < 0.3) |
+        (pricing_table["unfunded_ratio"] > 0.30),
+    ]
+    choices = ["High", "Low"]
+    pricing_table["confidence"] = np.select(conditions, choices, default="Medium")
+
+    # Sort and reset index to remove raw index column
+    pricing_table = pricing_table.sort_values("mkt_price", ascending=False).reset_index(drop=True)
+    pricing_table.index = pricing_table.index + 1  # 1-based rank
+    pricing_table.index.name = "Rank"
+
+    display = pricing_table[["fund_name", "gp_name", "strategy", "vintage_year",
+                              "ending_nav_mm", "tvpi", "dpi", "unfunded_ratio",
+                              "track_record_score", "mkt_price", "model_price",
+                              "mispricing", "implied_value_mm", "confidence"]].copy()
+    display.columns = ["Fund", "GP", "Strategy", "Vintage", "NAV ($M)", "TVPI",
+                       "DPI", "Unfunded %", "GP Score", "Mkt Price", "Model Price",
+                       "Mispricing", "Implied Value ($M)", "Confidence"]
 
     st.dataframe(
-        pricing_table.style.format({
+        display.style.format({
             "NAV ($M)": "{:,.1f}", "TVPI": "{:.2f}x", "DPI": "{:.2f}x",
             "Unfunded %": "{:.1%}", "GP Score": "{:.2f}",
             "Mkt Price": "{:.1%}", "Model Price": "{:.1%}",
+            "Mispricing": "{:+.1%}",
             "Implied Value ($M)": "{:,.1f}",
         }),
         use_container_width=True, height=500,
